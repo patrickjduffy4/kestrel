@@ -1,0 +1,25 @@
+# API keys and config
+config.py
+
+# Algorithm core — don't share
+feed/advisor/
+feed/opportunity/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Data — too large for version control
+data/
+models/
+logs/
+reports/
+watchlists/
+
+# Database files
+*.db
+
+# PyCharm
+.idea/

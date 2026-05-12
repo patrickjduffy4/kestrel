@@ -1,10 +1,9 @@
 # Kestrel
-
 Automated US market surveillance and day trading system.
 
 Watches the full US equity market, scores stocks daily, and feeds a trading bot.
 
-## Structure
+## Architecture
 
 **Feed** — the brain
 - `scan/` — figures out what's worth tracking
@@ -16,17 +15,39 @@ Watches the full US equity market, scores stocks daily, and feeds a trading bot.
 
 **Pipeline** — runs everything in order
 
+## Advisor Architecture
+
+Two parallel systems running simultaneously:
+
+**System A — Rule Based Advisor**
+Transparent scoring system. Makes actual paper trade decisions.
+Generates labeled training data. Works immediately.
+
+**System B — Neural Network Advisor**
+Shadow mode only. Watches System A, learns from outcomes.
+Runs its own separate paper account. Never makes live decisions.
+Graduates to live when it consistently outperforms System A
+over 30 consecutive trading days.
+
+**Claude API — NN Overseer**
+Runs nightly. Reads both systems' performance.
+Analyzes disagreements. Suggests training adjustments.
+Flags when System B is ready to graduate.
+
 ## Status
 
-| Agent | status      | 
-|---|-------------|
-| Scan | done        |
-| Market Pull | in progress |
-| Opportunity | not started |
-| Advisor | not started |
-| Trader | not started |
+| Component | Status |
+|---|---|
+| Scan | done |
+| Market Pull | done |
+| Pre-market Opportunity | done |
+| Open Scan | next |
+| Intraday Scan | planned |
+| System A Advisor | planned |
+| System B Neural Network | planned |
+| Claude Overseer | planned |
+| Trader | planned |
 
 ## Data
-- 6,046 US stocks tracked
-- 10 years of daily OHLCV history
-- Full US market universe (NYSE + NASDAQ + AMEX)
+
+~6,700 US stocks tracked. 10 years of daily history. Updated daily.

@@ -1,16 +1,20 @@
-import yfinance as yf
-import pandas as pd
 import os
-import time
+import sqlite3
+import pandas as pd
 import logging
 from datetime import datetime, timedelta
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockBarsRequest
+from alpaca.data.timeframe import TimeFrame
 
-# --- Paths ---
-ROOT = "D:/Kestrel"
-RAW_DATA = os.path.join(ROOT, "data/raw")
-LOG_PATH = os.path.join(ROOT, "logs/downloader.log")
+# --- Config ---
+from config import (
+    ALPACA_API_KEY, ALPACA_SECRET_KEY,
+    ROOT, DB_MARKET, RAW_DATA
+)
 
-# --- Logging setup ---
+# --- Logging ---
+LOG_PATH = os.path.join(ROOT, "logs/market_pull.log")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -19,107 +23,125 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-log = logging.getLogger("kestrel.downloader")
+log = logging.getLogger("kestrel.market_pull")
 
-# --- Date range ---
-END_DATE   = datetime.today().strftime("%Y-%m-%d")
-START_DATE = (datetime.today() - timedelta(days=365 * 10)).strftime("%Y-%m-%d")
+# --- Alpaca client ---
+client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
 
-def get_all_tickers():
-    """Pull every ticker from NYSE, NASDAQ, and AMEX."""
-    log.info("Fetching full US market ticker list...")
+# --- Settings ---
+HISTORY_YEARS = 10
+BATCH_SIZE    = 50  # tickers per request
 
-    url = "https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/main/all/all_tickers.txt"
-    try:
-        tickers = pd.read_csv(url, header=None)[0].tolist()
-        tickers = [t.strip().upper() for t in tickers if isinstance(t, str)]
-        log.info(f"Found {len(tickers)} tickers")
-        return tickers
-    except Exception as e:
-        log.error(f"Failed to fetch ticker list: {e}")
-        return []
+def get_tracked_tickers():
+    """Pull FULL and TRACK tickers from manifest."""
+    conn = sqlite3.connect(DB_MARKET)
+    df = pd.read_sql(
+        "SELECT ticker FROM manifest WHERE classification IN ('FULL', 'TRACK')",
+        conn
+    )
+    conn.close()
+    tickers = df['ticker'].tolist()
+    log.info(f"Found {len(tickers)} tickers to update")
+    return tickers
 
-def already_downloaded(ticker):
-    """Check if we already have this stock's data."""
+def already_current(ticker):
+    """Check if we already have today's data."""
     path = os.path.join(RAW_DATA, f"{ticker}.parquet")
-    return os.path.exists(path)
-
-def download_ticker(ticker):
-    """Download 10 years of daily OHLCV data for one ticker."""
-    try:
-        df = yf.download(
-            ticker,
-            start=START_DATE,
-            end=END_DATE,
-            progress=False,
-            auto_adjust=True
-        )
-
-        if df.empty or len(df) < 100:
-            log.warning(f"  {ticker}: insufficient data ({len(df)} rows) — skipping")
-            return False
-
-        # Save as parquet
-        path = os.path.join(RAW_DATA, f"{ticker}.parquet")
-        df.to_parquet(path)
-        return True
-
-    except Exception as e:
-        log.error(f"  {ticker}: failed — {e}")
+    if not os.path.exists(path):
         return False
+    df = pd.read_parquet(path)
+    if df.empty:
+        return False
+    last_date = df.index[-1]
+    if hasattr(last_date, 'date'):
+        last_date = last_date.date()
+    return last_date >= datetime.today().date() - timedelta(days=3)
+
+def download_batch(tickers, start_date, end_date):
+    """Download a batch of tickers from Alpaca."""
+    request = StockBarsRequest(
+        symbol_or_symbols=tickers,
+        timeframe=TimeFrame.Day,
+        start=start_date,
+        end=end_date,
+        adjustment='all'
+    )
+    bars = client.get_stock_bars(request)
+    return bars.df
+
+def save_ticker(ticker, df):
+    """Save a single ticker's data as parquet."""
+    path = os.path.join(RAW_DATA, f"{ticker}.parquet")
+
+    # If file exists, merge with existing data
+    if os.path.exists(path):
+        existing = pd.read_parquet(path)
+        df = pd.concat([existing, df])
+        df = df[~df.index.duplicated(keep='last')]
+        df = df.sort_index()
+
+    df.to_parquet(path)
 
 def run():
-    tickers = get_all_tickers()
-    if not tickers:
-        log.error("No tickers found. Exiting.")
-        return
+    tickers = get_tracked_tickers()
+    total   = len(tickers)
 
-    total     = len(tickers)
-    skipped   = 0
-    success   = 0
-    failed    = 0
+    # Filter out already current
+    tickers = [t for t in tickers if not already_current(t)]
+    log.info(f"{total - len(tickers)} already current, downloading {len(tickers)}")
+
+    end_date   = datetime.today()
+    start_date = end_date - timedelta(days=365 * HISTORY_YEARS)
+
+    success = 0
+    failed  = 0
     failed_list = []
 
-    log.info(f"Starting download: {total} tickers | {START_DATE} to {END_DATE}\n")
+    # Process in batches
+    for i in range(0, len(tickers), BATCH_SIZE):
+        batch = tickers[i:i + BATCH_SIZE]
+        log.info(f"Batch {i//BATCH_SIZE + 1} — downloading {len(batch)} tickers...")
 
-    for i, ticker in enumerate(tickers, 1):
-        if already_downloaded(ticker):
-            skipped += 1
-            if skipped % 100 == 0:
-                log.info(f"  Skipped {skipped} already downloaded...")
-            continue
+        try:
+            df = download_batch(batch, start_date, end_date)
 
-        log.info(f"[{i}/{total}] Downloading {ticker}...")
-        result = download_ticker(ticker)
+            for ticker in batch:
+                try:
+                    if ticker in df.index.get_level_values(0):
+                        ticker_df = df.loc[ticker]
+                        save_ticker(ticker, ticker_df)
+                        success += 1
+                    else:
+                        log.warning(f"  {ticker}: no data returned")
+                        failed += 1
+                        failed_list.append(ticker)
+                except Exception as e:
+                    log.error(f"  {ticker}: save failed — {e}")
+                    failed += 1
+                    failed_list.append(ticker)
 
-        if result:
-            success += 1
-        else:
-            failed += 1
-            failed_list.append(ticker)
+        except Exception as e:
+            log.error(f"Batch failed — {e}")
+            failed += len(batch)
+            failed_list.extend(batch)
 
-        # Be polite to Yahoo Finance — don't hammer it
-        time.sleep(0.3)
+        # Progress
+        if (i // BATCH_SIZE + 1) % 10 == 0:
+            log.info(f"Progress: {i + BATCH_SIZE}/{len(tickers)} | Success: {success} | Failed: {failed}")
 
-        # Progress update every 100 stocks
-        if i % 100 == 0:
-            log.info(f"\n  Progress: {i}/{total} | Success: {success} | Failed: {failed} | Skipped: {skipped}\n")
-
-    # Save failed tickers so we can retry later
+    # Save failed list
     if failed_list:
-        fail_path = os.path.join(ROOT, "logs/failed_tickers.txt")
+        fail_path = os.path.join(ROOT, "logs/market_pull_failed.txt")
         with open(fail_path, "w") as f:
             f.write("\n".join(failed_list))
-        log.info(f"\nFailed tickers saved to {fail_path}")
 
     log.info(f"""
     =============================
-    KESTREL DOWNLOAD COMPLETE
+    MARKET PULL COMPLETE
     =============================
-    Total tickers:   {total}
-    Downloaded:      {success}
-    Skipped:         {skipped}
-    Failed:          {failed}
+    Total:      {len(tickers)}
+    Success:    {success}
+    Failed:     {failed}
     =============================
     """)
 

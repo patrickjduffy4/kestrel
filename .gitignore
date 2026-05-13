@@ -2,8 +2,10 @@
 config.py
 
 # Algorithm core — don't share
-feed/advisor/
-feed/opportunity/
+feed/advisor/scorer.py
+feed/advisor/model.py
+feed/opportunity/opportunity.py
+feed/opportunity/intraday_scan.py
 
 # Python
 __pycache__/

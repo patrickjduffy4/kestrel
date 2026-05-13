@@ -5,34 +5,37 @@ Watches the full US equity market, scores stocks daily, and feeds a trading bot.
 
 ## Architecture
 
-**Feed** â€” the brain
-- `scan/` â€” figures out what's worth tracking
-- `market_pull/` â€” keeps data current
-- `opportunity/` â€” spots intraday setups
-- `advisor/` â€” scores and ranks candidates
+**Feed** — the brain
+- `scan/` — figures out what's worth tracking
+- `market_pull/` — keeps data current
+- `opportunity/` — spots intraday setups
+- `advisor/` — System A rule based scorer
 
-**Trader** â€” acts on what Feed finds
+**Bird Brain** — the neural network advisor in training
+- shadow mode only
+- watches System A, learns from outcomes
+- runs its own separate paper account
+- graduates when it consistently outperforms System A
 
-**Pipeline** â€” runs everything in order
+**Trader** — acts on what Feed finds
+
+**Pipeline** — runs everything in order, generates reports
 
 ## Advisor Architecture
 
-Two parallel systems running simultaneously:
+**System A — Rule Based Advisor**
+Transparent scoring. Makes actual paper trade decisions.
+Generates labeled training data for Bird Brain.
 
-**System A â€” Rule Based Advisor**
-Transparent scoring system. Makes actual paper trade decisions.
-Generates labeled training data. Works immediately.
+**Bird Brain — Neural Network Advisor**
+Shadow mode only. Learns from System A's outcomes.
+Runs separate paper account. Never makes live decisions.
+Graduates after 30 consecutive days outperforming System A.
 
-**System B â€” Neural Network Advisor**
-Shadow mode only. Watches System A, learns from outcomes.
-Runs its own separate paper account. Never makes live decisions.
-Graduates to live when it consistently outperforms System A
-over 30 consecutive trading days.
-
-**Claude API â€” NN Overseer**
-Runs nightly. Reads both systems' performance.
-Analyzes disagreements. Suggests training adjustments.
-Flags when System B is ready to graduate.
+**Claude — Weekly Strategic Advisor**
+Reads week's performance across four focused analyses.
+Generates strategic recommendations every Sunday.
+Feeds structured findings back to Bird Brain's training loop.
 
 ## Status
 
@@ -41,13 +44,19 @@ Flags when System B is ready to graduate.
 | Scan | done |
 | Market Pull | done |
 | Pre-market Opportunity | done |
-| Open Scan | next |
-| Intraday Scan | planned |
+| Open Scan | done |
+| Daily Report | done |
+| Weekly Report (Claude) | done |
+| Intraday Scan | next |
 | System A Advisor | planned |
-| System B Neural Network | planned |
-| Claude Overseer | planned |
+| Bird Brain Neural Network | planned |
 | Trader | planned |
+| Pipeline Orchestrator | planned |
+
+## Known Issues
+- Volume ratio showing 0.0 — pipeline bug, fix before trading
+- Gap threshold needs raising to 5%
+- Catalyst tagging not yet implemented
 
 ## Data
-
 ~6,700 US stocks tracked. 10 years of daily history. Updated daily.

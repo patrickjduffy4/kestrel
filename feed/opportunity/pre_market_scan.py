@@ -28,7 +28,7 @@ log = logging.getLogger("kestrel.pre_market_scan")
 client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
 
 # --- Settings ---
-GAP_THRESHOLD  = 0.02    # 2% minimum gap
+GAP_THRESHOLD  = 0.05    # 2% minimum gap
 MIN_AVG_VOLUME = 500000  # minimum average daily volume
 BATCH_SIZE     = 50      # quotes per Alpaca request
 ATR_TOP_N      = 500     # pre-filter to top N volatile stocks
@@ -181,6 +181,12 @@ def assess_candidates(tickers, quotes):
         avg_move = float(returns.tail(20).abs().mean())
         relative_gap = abs(gap) / avg_move if avg_move > 0 else 0
 
+        # Volume trend — is recent volume increasing?
+        vol_col = get_volume_col(hist)
+        avg_vol_20 = float(hist[vol_col].tail(20).mean()) if vol_col else 0
+        avg_vol_5 = float(hist[vol_col].tail(5).mean()) if vol_col else 0
+        volume_trend = round(avg_vol_5 / avg_vol_20, 2) if avg_vol_20 > 0 else 0
+
         candidates.append({
             'ticker':          ticker,
             'yesterday_close': round(yesterday_close, 4),
@@ -189,6 +195,7 @@ def assess_candidates(tickers, quotes):
             'gap_pct':         round(gap * 100, 2),
             'direction':       'up' if gap > 0 else 'down',
             'avg_volume':      int(avg_volume),
+            'volume_trend':    volume_trend,
             'spread':          spread,
             'avg_daily_move':  round(avg_move * 100, 2),
             'relative_gap':    round(relative_gap, 2),
@@ -243,8 +250,10 @@ def run():
             f"gap: {row['gap_pct']:+.2f}% | "
             f"rel: {row['relative_gap']:.1f}x | "
             f"vol: {row['avg_volume']:,.0f} | "
-            f"spread: {row['spread']*100:.2f}%"
+            f"vol_trend: {row.get('volume_trend', 0):.2f}x | "
+            f"spread: {row['spread'] * 100:.2f}%"
         )
+
 
 if __name__ == "__main__":
     run()

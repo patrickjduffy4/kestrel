@@ -18,19 +18,19 @@ folders = [
     "reports/weekly",
     "logs",
 
-    # Feed agents
+    # Feed
     "feed/scan",
     "feed/market_pull",
     "feed/opportunity",
     "feed/advisor",
 
     # Bird Brain
-    "bird_brain/models",
-    "bird_brain/training",
-    "bird_brain/paper_account",
+    "bird_brain/left_brain",    # NN trader
+    "bird_brain/right_brain",   # NN advisor
 
     # Trader
-    "trader",
+    "trader/rule_engine",
+    "trader/nn_engine",
 
     # Pipeline
     "pipeline",
@@ -53,8 +53,11 @@ modules = [
     "feed/opportunity",
     "feed/advisor",
     "bird_brain",
-    "bird_brain/training",
+    "bird_brain/left_brain",
+    "bird_brain/right_brain",
     "trader",
+    "trader/rule_engine",
+    "trader/nn_engine",
     "pipeline",
     "utils",
 ]
@@ -69,41 +72,61 @@ for module in modules:
 readme = """# Kestrel
 Automated US market surveillance and day trading system.
 
-Watches the full US equity market, scores stocks daily, and feeds a trading bot.
+Watches the full US equity market, scores stocks daily, and feeds an aggressive day trading bot.
 
 ## Architecture
 
-**Feed** — the brain
-- `scan/` — figures out what's worth tracking
-- `market_pull/` — keeps data current
-- `opportunity/` — spots intraday setups
-- `advisor/` — System A rule based scorer
+### Feed — market intelligence
+- `scan/` — classifies and tracks the full US equity universe
+- `market_pull/` — keeps price and fundamental data current
+- `opportunity/` — detects gap and intraday trading setups
+- `advisor/` — rule-based scorer, builds daily watchlist
 
-**Bird Brain** — the neural network advisor in training
-- shadow mode only
-- watches System A, learns from outcomes
-- runs its own separate paper account
-- graduates when it consistently outperforms System A
+### Trader — execution
+- `rule_engine/` — rule-based buy/sell/stop logic
+- `nn_engine/` — Left Brain NN execution (build after rule engine)
 
-**Trader** — acts on what Feed finds
+### Bird Brain — learning systems
+- `left_brain/` — NN trader, learns from rule_engine + Claude
+- `right_brain/` — NN advisor, learns from advisor + Claude
 
-**Pipeline** — runs everything in order, generates reports
+### Pipeline — orchestration
+Runs all agents in correct order. Generates reports. Manages scheduling.
 
 ## Advisor Architecture
 
-**System A — Rule Based Advisor**
-Transparent scoring. Makes actual paper trade decisions.
-Generates labeled training data for Bird Brain.
+**Rule-based Advisor** — scores gap candidates, maintains 20 stock watchlist.
+Transparent, tunable, works immediately. Generates labeled training data.
 
-**Bird Brain — Neural Network Advisor**
-Shadow mode only. Learns from System A's outcomes.
-Runs separate paper account. Never makes live decisions.
-Graduates after 30 consecutive days outperforming System A.
+**Right Brain** — NN advisor in shadow mode.
+Watches rule-based advisor, learns from outcomes.
+Runs separate paper account. Graduates after 30 days outperforming rules.
 
-**Claude — Weekly Strategic Advisor**
-Reads week's performance across four focused analyses.
-Generates strategic recommendations every Sunday.
-Feeds structured findings back to Bird Brain's training loop.
+## Trader Architecture
+
+**Rule Engine** — executes trades based on watchlist and signals.
+Manages entries, exits, stop losses, take profits.
+Aggressive day trader — multiple trades per stock per day, all closed by 1pm PT.
+
+**Left Brain** — NN trader in shadow mode.
+Watches rule engine, learns better entry/exit timing.
+Runs separate paper account. Graduates after 30 days outperforming rules.
+
+## Claude — Weekly Strategic Advisor
+Four focused analyses every Sunday:
+1. Opportunity agent performance
+2. Advisor performance — rule vs NN
+3. Trading performance — rule vs NN
+4. Strategic recommendations
+
+Findings feed back into both NN training loops.
+
+## Build Order
+1. feed/advisor/       rule-based scorer         ← next
+2. trader/rule_engine  rule-based execution
+3. pipeline            orchestration
+4. bird_brain/right_brain  NN advisor
+5. bird_brain/left_brain   NN trader
 
 ## Status
 
@@ -115,15 +138,15 @@ Feeds structured findings back to Bird Brain's training loop.
 | Open Scan | done |
 | Daily Report | done |
 | Weekly Report (Claude) | done |
-| Intraday Scan | next |
-| System A Advisor | planned |
-| Bird Brain Neural Network | planned |
-| Trader | planned |
-| Pipeline Orchestrator | planned |
+| Rule-based Advisor | next |
+| Rule Engine Trader | planned |
+| Pipeline | planned |
+| Right Brain NN Advisor | planned |
+| Left Brain NN Trader | planned |
 
 ## Known Issues
-- Volume ratio showing 0.0 — pipeline bug, fix before trading
-- Gap threshold needs raising to 5%
+- Volume ratio showing 0.0 — needs minute bar history
+- QUCY data quality ghost slipping through z-score
 - Catalyst tagging not yet implemented
 
 ## Data
@@ -131,7 +154,7 @@ Feeds structured findings back to Bird Brain's training loop.
 """
 
 readme_path = os.path.join(ROOT, "README.md")
-with open(readme_path, "w") as f:
+with open(readme_path, "w", encoding='utf-8') as f:
     f.write(readme)
 
 print(f"\nREADME written to {readme_path}")

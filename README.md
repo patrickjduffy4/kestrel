@@ -1,41 +1,61 @@
 # Kestrel
 Automated US market surveillance and day trading system.
 
-Watches the full US equity market, scores stocks daily, and feeds a trading bot.
+Watches the full US equity market, scores stocks daily, and feeds an aggressive day trading bot.
 
 ## Architecture
 
-**Feed** ó the brain
-- `scan/` ó figures out what's worth tracking
-- `market_pull/` ó keeps data current
-- `opportunity/` ó spots intraday setups
-- `advisor/` ó System A rule based scorer
+### Feed ‚Äî market intelligence
+- `scan/` ‚Äî classifies and tracks the full US equity universe
+- `market_pull/` ‚Äî keeps price and fundamental data current
+- `opportunity/` ‚Äî detects gap and intraday trading setups
+- `advisor/` ‚Äî rule-based scorer, builds daily watchlist
 
-**Bird Brain** ó the neural network advisor in training
-- shadow mode only
-- watches System A, learns from outcomes
-- runs its own separate paper account
-- graduates when it consistently outperforms System A
+### Trader ‚Äî execution
+- `rule_engine/` ‚Äî rule-based buy/sell/stop logic
+- `nn_engine/` ‚Äî Left Brain NN execution (build after rule engine)
 
-**Trader** ó acts on what Feed finds
+### Bird Brain ‚Äî learning systems
+- `left_brain/` ‚Äî NN trader, learns from rule_engine + Claude
+- `right_brain/` ‚Äî NN advisor, learns from advisor + Claude
 
-**Pipeline** ó runs everything in order, generates reports
+### Pipeline ‚Äî orchestration
+Runs all agents in correct order. Generates reports. Manages scheduling.
 
 ## Advisor Architecture
 
-**System A ó Rule Based Advisor**
-Transparent scoring. Makes actual paper trade decisions.
-Generates labeled training data for Bird Brain.
+**Rule-based Advisor** ‚Äî scores gap candidates, maintains 20 stock watchlist.
+Transparent, tunable, works immediately. Generates labeled training data.
 
-**Bird Brain ó Neural Network Advisor**
-Shadow mode only. Learns from System A's outcomes.
-Runs separate paper account. Never makes live decisions.
-Graduates after 30 consecutive days outperforming System A.
+**Right Brain** ‚Äî NN advisor in shadow mode.
+Watches rule-based advisor, learns from outcomes.
+Runs separate paper account. Graduates after 30 days outperforming rules.
 
-**Claude ó Weekly Strategic Advisor**
-Reads week's performance across four focused analyses.
-Generates strategic recommendations every Sunday.
-Feeds structured findings back to Bird Brain's training loop.
+## Trader Architecture
+
+**Rule Engine** ‚Äî executes trades based on watchlist and signals.
+Manages entries, exits, stop losses, take profits.
+Aggressive day trader ‚Äî multiple trades per stock per day, all closed by 1pm PT.
+
+**Left Brain** ‚Äî NN trader in shadow mode.
+Watches rule engine, learns better entry/exit timing.
+Runs separate paper account. Graduates after 30 days outperforming rules.
+
+## Claude ‚Äî Weekly Strategic Advisor
+Four focused analyses every Sunday:
+1. Opportunity agent performance
+2. Advisor performance ‚Äî rule vs NN
+3. Trading performance ‚Äî rule vs NN
+4. Strategic recommendations
+
+Findings feed back into both NN training loops.
+
+## Build Order
+1. feed/advisor/       rule-based scorer         ‚Üê next
+2. trader/rule_engine  rule-based execution
+3. pipeline            orchestration
+4. bird_brain/right_brain  NN advisor
+5. bird_brain/left_brain   NN trader
 
 ## Status
 
@@ -47,15 +67,15 @@ Feeds structured findings back to Bird Brain's training loop.
 | Open Scan | done |
 | Daily Report | done |
 | Weekly Report (Claude) | done |
-| Intraday Scan | next |
-| System A Advisor | planned |
-| Bird Brain Neural Network | planned |
-| Trader | planned |
-| Pipeline Orchestrator | planned |
+| Rule-based Advisor | next |
+| Rule Engine Trader | planned |
+| Pipeline | planned |
+| Right Brain NN Advisor | planned |
+| Left Brain NN Trader | planned |
 
 ## Known Issues
-- Volume ratio showing 0.0 ó pipeline bug, fix before trading
-- Gap threshold needs raising to 5%
+- Volume ratio showing 0.0 ‚Äî needs minute bar history
+- QUCY data quality ghost slipping through z-score
 - Catalyst tagging not yet implemented
 
 ## Data

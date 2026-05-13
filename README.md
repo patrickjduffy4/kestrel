@@ -51,8 +51,8 @@ Four focused analyses every Sunday:
 Findings feed back into both NN training loops.
 
 ## Build Order
-1. feed/advisor/       rule-based scorer         ← next
-2. trader/rule_engine  rule-based execution
+1. trader/rule_engine  rule-based execution     ← current
+2. feed/advisor/       rule-based scorer
 3. pipeline            orchestration
 4. bird_brain/right_brain  NN advisor
 5. bird_brain/left_brain   NN trader
@@ -65,10 +65,12 @@ Findings feed back into both NN training loops.
 | Market Pull | done |
 | Pre-market Opportunity | done |
 | Open Scan | done |
+| Performance Databases | done |
 | Daily Report | done |
 | Weekly Report (Claude) | done |
-| Rule-based Advisor | next |
-| Rule Engine Trader | planned |
+| sizing.py | done |
+| Rule Engine Trader | in progress |
+| Rule-based Advisor | planned |
 | Pipeline | planned |
 | Right Brain NN Advisor | planned |
 | Left Brain NN Trader | planned |

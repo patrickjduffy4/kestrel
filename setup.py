@@ -20,6 +20,7 @@ folders = [
     "data/features",
     "data/database",
 
+
     # Models
     "models/current",
     "models/checkpoints",
@@ -27,6 +28,8 @@ folders = [
     # Outputs
     "watchlists",
     "reports",
+    "reports/daily",
+    "reports/weekly",
     "logs",
 ]
 

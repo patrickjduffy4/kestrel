@@ -267,8 +267,11 @@ def build_rightbrain_features(gap_pct, relative_gap, vol_trend,
                                consecutive_days, spy_momentum,
                                qqq_momentum, vix_norm,
                                float_norm, short_ratio_norm,
-                               earnings_proximity):
-    """Build normalized 22-feature vector for rightbrain."""
+                               earnings_proximity,
+                               catalyst_quality=0.5,
+                               catalyst_alignment=0.5,
+                               catalyst_credibility=0.5):
+    """Build normalized 25-feature vector for rightbrain."""
     spread_norm   = 0.5
     accuracy_norm = 0.5
 
@@ -295,6 +298,9 @@ def build_rightbrain_features(gap_pct, relative_gap, vol_trend,
         qqq_momentum,
         vix_norm,
         earnings_proximity,
+        float(catalyst_quality),
+        float(catalyst_alignment),
+        float(catalyst_credibility),
     ], dtype=np.float32)
 
 def build_leftbrain_features(gap_pct, price_vs_5d, price_vs_20d,

@@ -26,10 +26,10 @@ class RightBrain(nn.Module):
     rightbrain — neural network advisor.
     Learns to score gap candidates from rule-based advisor outcomes.
 
-    Input:  22 normalized features
+    Input:  25 normalized features
     Output: score 0-1 (higher = better candidate)
     """
-    def __init__(self, input_size=22):
+    def __init__(self, input_size=25):
         super(RightBrain, self).__init__()
 
         self.network = nn.Sequential(
@@ -111,13 +111,13 @@ class RightBrain(nn.Module):
 
 def get_model():
     """Get rightbrain model — load if exists, create fresh if not."""
-    model = RightBrain(input_size=22)
+    model = RightBrain(input_size=25)
     model.load()
     return model
 
 if __name__ == "__main__":
     log.info("Initializing rightbrain model...")
-    model = RightBrain(input_size=22)
+    model = RightBrain(input_size=25)
 
     # Count parameters
     params = sum(p.numel() for p in model.parameters())
@@ -125,7 +125,7 @@ if __name__ == "__main__":
 
     # Test forward pass
     import numpy as np
-    test_features = np.random.rand(22).astype(np.float32)
+    test_features = np.random.rand(25).astype(np.float32)
     score = model.score(test_features)
     log.info(f"Test score: {score:.4f}")
 

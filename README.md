@@ -54,8 +54,8 @@ Findings feed back into both NN training loops.
 1. feed/advisor/       rule-based scorer         ← next
 2. trader/rule_engine  rule-based execution
 3. pipeline            orchestration
-4. bird_brain/right_brain  NN advisor
-5. bird_brain/left_brain   NN trader
+4. birdbrain/rightbrain  NN advisor
+5. birdbrain/leftbrain   NN trader
 
 ## Status
 

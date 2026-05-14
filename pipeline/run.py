@@ -252,6 +252,16 @@ def run_open_scan():
     except Exception as e:
         log.error(f"Open scan failed: {e}")
 
+def run_rightbrain_trainer():
+    """Run rightbrain nightly training."""
+    log.info("Running rightbrain nightly trainer...")
+    try:
+        from birdbrain.rightbrain.trainer import run
+        run()
+        log.info("rightbrain training complete")
+    except Exception as e:
+        log.error(f"rightbrain training failed: {e}")
+
 def run_daily_report():
     """Run daily report generator."""
     log.info("Generating daily report...")
@@ -313,6 +323,7 @@ def daily_cycle():
     # 1:15pm — daily report
     sleep_until(DAILY_REPORT_TIME, "daily report")
     print_end_of_day()
+    run_rightbrain_trainer()
     run_daily_report()
 
     # Sunday 8pm — weekly report

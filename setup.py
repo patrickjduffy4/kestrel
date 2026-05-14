@@ -25,8 +25,8 @@ folders = [
     "feed/advisor",
 
     # Bird Brain
-    "bird_brain/left_brain",    # NN trader
-    "bird_brain/right_brain",   # NN advisor
+    "birdbrain/leftbrain",    # NN trader
+    "birdbrain/rightbrain",   # NN advisor
 
     # Trader
     "trader/rule_engine",
@@ -52,9 +52,9 @@ modules = [
     "feed/market_pull",
     "feed/opportunity",
     "feed/advisor",
-    "bird_brain",
-    "bird_brain/left_brain",
-    "bird_brain/right_brain",
+    "birdbrain",
+    "birdbrain/leftbrain",
+    "birdbrain/rightbrain",
     "trader",
     "trader/rule_engine",
     "trader/nn_engine",
@@ -87,8 +87,8 @@ Watches the full US equity market, scores stocks daily, and feeds an aggressive 
 - `nn_engine/` — Left Brain NN execution (build after rule engine)
 
 ### Bird Brain — learning systems
-- `left_brain/` — NN trader, learns from rule_engine + Claude
-- `right_brain/` — NN advisor, learns from advisor + Claude
+- `leftbrain/` — NN trader, learns from rule_engine + Claude
+- `rightbrain/` — NN advisor, learns from advisor + Claude
 
 ### Pipeline — orchestration
 Runs all agents in correct order. Generates reports. Manages scheduling.
@@ -125,8 +125,8 @@ Findings feed back into both NN training loops.
 1. feed/advisor/       rule-based scorer         ← next
 2. trader/rule_engine  rule-based execution
 3. pipeline            orchestration
-4. bird_brain/right_brain  NN advisor
-5. bird_brain/left_brain   NN trader
+4. birdbrain/rightbrain  NN advisor
+5. birdbrain/leftbrain   NN trader
 
 ## Status
 

@@ -106,42 +106,25 @@ def wait_for_market():
         time.sleep(sleep_time)
 
 # --- Watchlist ---
-
 def load_watchlist():
-    """Load current watchlist from signals.db."""
+    """Load current watchlist from watchlist.db."""
     try:
-        conn = sqlite3.connect(DB_SIGNALS)
-        df   = pd.read_sql(
-            "SELECT * FROM confirmed_gaps ORDER BY relative_gap DESC",
-            conn
-        )
-        conn.close()
-
+        from pipeline.watchlist_db import get_watchlist
+        df = get_watchlist()
+        if df.empty:
+            return []
         watchlist = []
         for _, row in df.iterrows():
-            ticker = row['ticker']
-            score  = row.get('relative_gap', 0) / 10
-
-            # Long only
-            if row.get('direction') != 'up':
-                continue
-
-            # Price check
-            price = _prices.get(ticker, 0)
+            price = _prices.get(row['ticker'], 0)
             if price > 0 and not is_price_eligible(price):
                 continue
-
-            if score >= MIN_SCORE:
-                watchlist.append({
-                    'ticker':     ticker,
-                    'score':      min(score, 1.0),
-                    'gap_pct':    row.get('real_gap_pct', 0),
-                    'avg_volume': row.get('avg_volume', 0)
-                })
-
-        watchlist.sort(key=lambda x: x['score'], reverse=True)
-        return watchlist[:20]
-
+            watchlist.append({
+                'ticker':     row['ticker'],
+                'score':      row['score'],
+                'gap_pct':    row.get('gap_pct', 0),
+                'avg_volume': row.get('avg_volume', 0)
+            })
+        return watchlist
     except Exception as e:
         log.error(f"Failed to load watchlist: {e}")
         return []

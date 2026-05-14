@@ -19,29 +19,29 @@ logging.basicConfig(
 )
 log = logging.getLogger("kestrel.rightbrain.model")
 
-MODEL_DIR = "/birdbrain/rightbrain/models"
+MODEL_DIR = "D:/Kestrel/birdbrain/rightbrain/models"
 
 class RightBrain(nn.Module):
     """
     rightbrain — neural network advisor.
     Learns to score gap candidates from rule-based advisor outcomes.
 
-    Input:  12 normalized features
+    Input:  22 normalized features
     Output: score 0-1 (higher = better candidate)
     """
-    def __init__(self, input_size=12):
+    def __init__(self, input_size=22):
         super(RightBrain, self).__init__()
 
         self.network = nn.Sequential(
-            nn.Linear(input_size, 64),
+            nn.Linear(input_size, 128),
             nn.ReLU(),
-            nn.Dropout(0.2),
+            nn.Dropout(0.3),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Dropout(0.3),
             nn.Linear(64, 32),
             nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(32, 16),
-            nn.ReLU(),
-            nn.Linear(16, 1),
+            nn.Linear(32, 1),
             nn.Sigmoid()
         )
 
@@ -111,13 +111,13 @@ class RightBrain(nn.Module):
 
 def get_model():
     """Get rightbrain model — load if exists, create fresh if not."""
-    model = RightBrain(input_size=12)
+    model = RightBrain(input_size=22)
     model.load()
     return model
 
 if __name__ == "__main__":
     log.info("Initializing rightbrain model...")
-    model = RightBrain(input_size=12)
+    model = RightBrain(input_size=22)
 
     # Count parameters
     params = sum(p.numel() for p in model.parameters())
@@ -125,7 +125,7 @@ if __name__ == "__main__":
 
     # Test forward pass
     import numpy as np
-    test_features = np.random.rand(12).astype(np.float32)
+    test_features = np.random.rand(22).astype(np.float32)
     score = model.score(test_features)
     log.info(f"Test score: {score:.4f}")
 

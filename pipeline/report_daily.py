@@ -6,6 +6,7 @@ from datetime import datetime, date
 
 # --- Config ---
 from config import ROOT, DB_SIGNALS
+from pipeline.scribe import ask_deepseek
 from pipeline.performance_db import (
     mark_report_pending,
     mark_report_complete,
@@ -80,6 +81,50 @@ def get_advisor_stats(report_date):
     finally:
         conn.close()
 
+def get_missed_opportunities(report_date):
+    """Pull today's missed-opp sweep results."""
+    conn = sqlite3.connect(DB_SIGNALS)
+    try:
+        return pd.read_sql(
+            "SELECT * FROM missed_opportunities WHERE date = ? ORDER BY max_up_pct DESC",
+            conn, params=(report_date,)
+        )
+    except Exception as e:
+        log.error(f"Failed to get missed opportunities: {e}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+def get_trader_rejections(report_date):
+    """Pull today's trader rejections."""
+    conn = sqlite3.connect(DB_SIGNALS)
+    try:
+        return pd.read_sql(
+            "SELECT * FROM trader_rejections WHERE date = ? ORDER BY timestamp",
+            conn, params=(report_date,)
+        )
+    except Exception as e:
+        log.error(f"Failed to get trader rejections: {e}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+def per_strategy_stats(trades_df):
+    """Group trades by strategy for the per-strategy table."""
+    if trades_df.empty or 'strategy' not in trades_df.columns:
+        return {}
+    out = {}
+    for strat, sub in trades_df.groupby('strategy'):
+        wins = sub[sub['pnl'] > 0]
+        out[strat] = {
+            'trades':   len(sub),
+            'pnl':      round(sub['pnl'].sum(), 2),
+            'win_rate': round(len(wins) / len(sub) * 100, 1) if len(sub) > 0 else 0,
+            'avg_win':  round(wins['pnl'].mean(), 2) if not wins.empty else 0,
+            'avg_loss': round(sub[sub['pnl'] <= 0]['pnl'].mean(), 2) if (sub['pnl'] <= 0).any() else 0,
+        }
+    return out
+
 def calculate_daily_summary(trades_df):
     """Calculate key performance metrics from trades."""
     if trades_df.empty:
@@ -140,7 +185,60 @@ def save_daily_summary(report_date, summary):
     conn.commit()
     conn.close()
 
-def generate_markdown(report_date, summary, candidates, confirmed, watchlist, trades, advisor):
+def generate_narrative(report_date, summary, candidates, confirmed, watchlist, trades, advisor):
+    """Ask local DeepSeek for a concise analysis of the day."""
+    top_gaps = ""
+    if not confirmed.empty:
+        top = confirmed.head(8)
+        for _, row in top.iterrows():
+            top_gaps += (
+                f"  - {row['ticker']:6} {row.get('direction',''):4} "
+                f"gap {row.get('real_gap_pct', 0):+.2f}%  "
+                f"accuracy {row.get('gap_accuracy', 0)*100:.0f}%\n"
+            )
+
+    trade_summary = ""
+    if not trades.empty:
+        for _, row in trades.iterrows():
+            trade_summary += (
+                f"  - {row['ticker']:6} {row.get('direction',''):4} "
+                f"entry ${row.get('entry_price',0):.2f} -> exit ${row.get('exit_price',0):.2f}  "
+                f"P&L ${row.get('pnl',0):+.2f}  hold {row.get('hold_time_minutes',0):.0f}m\n"
+            )
+    else:
+        trade_summary = "  (no trades)\n"
+
+    confirmation_rate = round(len(confirmed) / len(candidates) * 100, 1) if len(candidates) > 0 else 0
+
+    system = (
+        "You are the in-house analyst for Kestrel, an automated US-equity day trading bot. "
+        "Write a tight 200-300 word daily debrief for the operator (Patrick). "
+        "Be direct, specific, and grounded in the numbers provided. No filler, no hedging. "
+        "Cover: what worked, what didn't, the most useful pattern to notice, and one thing to "
+        "watch tomorrow. Plain markdown, no headings, no bullet lists unless you really need them."
+    )
+    user = f"""DATE: {report_date}
+
+P&L
+  total: ${summary['total_pnl']:,.2f}   trades: {summary['total_trades']}   win rate: {summary['win_rate']}%
+  avg win: ${summary['avg_win']:,.2f}   avg loss: ${summary['avg_loss']:,.2f}
+  best: ${summary['biggest_win']:,.2f}   worst: ${summary['biggest_loss']:,.2f}
+  avg hold: {summary['avg_hold']} min
+
+OPPORTUNITY
+  gap candidates: {len(candidates)}    confirmed: {len(confirmed)}    confirmation rate: {confirmation_rate}%
+  watchlist size: {len(watchlist)}
+
+TOP GAPS
+{top_gaps if top_gaps else "  (none)"}
+
+TRADES
+{trade_summary}
+"""
+    return ask_deepseek(system, user, max_tokens=900, temperature=0.4)
+
+def generate_markdown(report_date, summary, candidates, confirmed, watchlist, trades, advisor,
+                      missed=None, rejections=None, narrative=""):
     """Generate the daily markdown report."""
 
     # Opportunity section
@@ -196,6 +294,17 @@ def generate_markdown(report_date, summary, candidates, confirmed, watchlist, tr
             md += f"| {row['ticker']} | {row['direction']} | {row.get('real_gap_pct', 0):+.2f}% | {row.get('volume_ratio', 0):.1f}x | {row.get('gap_accuracy', 0)*100:.0f}% |\n"
         md += "\n"
 
+    # --- Per-strategy breakdown ---
+    strat_stats = per_strategy_stats(trades)
+    if strat_stats:
+        md += "---\n\n## P&L by Strategy\n\n"
+        md += "| Strategy | Trades | P&L | Win Rate | Avg Win | Avg Loss |\n"
+        md += "|---|---|---|---|---|---|\n"
+        for strat, s in strat_stats.items():
+            md += (f"| {strat} | {s['trades']} | ${s['pnl']:,.2f} | "
+                   f"{s['win_rate']}% | ${s['avg_win']:,.2f} | ${s['avg_loss']:,.2f} |\n")
+        md += "\n"
+
     md += f"""---
 
 ## Advisor Performance
@@ -216,11 +325,49 @@ def generate_markdown(report_date, summary, candidates, confirmed, watchlist, tr
     if trades.empty:
         md += "_No trades today._\n\n"
     else:
-        md += "| Ticker | Direction | Entry | Exit | P&L | Hold |\n"
-        md += "|---|---|---|---|---|---|\n"
+        md += "| Ticker | Strategy | Entry | Exit | P&L | Hold | Exit Reason |\n"
+        md += "|---|---|---|---|---|---|---|\n"
         for _, row in trades.iterrows():
-            md += f"| {row['ticker']} | {row['direction']} | ${row['entry_price']:.2f} | ${row['exit_price']:.2f} | ${row['pnl']:.2f} | {row['hold_time_minutes']:.0f}m |\n"
+            md += (f"| {row['ticker']} | {row.get('strategy','?')} | "
+                   f"${row['entry_price']:.2f} | ${row['exit_price']:.2f} | "
+                   f"${row['pnl']:.2f} | {row['hold_time_minutes']:.0f}m | "
+                   f"{row.get('exit_reason','')} |\n")
         md += "\n"
+
+    # --- Missed opportunities ---
+    if missed is not None and not missed.empty:
+        un_traded = missed[missed['was_traded'] == 0]
+        if not un_traded.empty:
+            md += "---\n\n## Missed Opportunities\n\n"
+            md += "_Watchlist tickers we didn't trade and what they did intraday._\n\n"
+            md += "| Ticker | Strategy | Score | Max Up | Close | Worst Down |\n"
+            md += "|---|---|---|---|---|---|\n"
+            for _, row in un_traded.head(15).iterrows():
+                md += (f"| {row['ticker']} | {row['strategy']} | {row['score']:.2f} | "
+                       f"{row['max_up_pct']:+.2f}% | {row['close_return_pct']:+.2f}% | "
+                       f"{row['max_down_pct']:+.2f}% |\n")
+            md += "\n"
+
+    # --- Trader rejections ---
+    if rejections is not None and not rejections.empty:
+        md += "---\n\n## Trader Rejections (Top Reasons)\n\n"
+        md += "_How often each rejection reason fired today (state-change-only logging)._\n\n"
+        # Strip parameterized parts for grouping (e.g. "price_above_5d_avg ($X >= $Y)" -> "price_above_5d_avg")
+        reasons = rejections['reason'].str.split(' ').str[0].fillna('unknown')
+        counts  = reasons.value_counts().head(10)
+        md += "| Reason | Count |\n|---|---|\n"
+        for reason, count in counts.items():
+            md += f"| {reason} | {count} |\n"
+        md += "\n"
+
+    if narrative:
+        md += f"""---
+
+## Analyst Note — DeepSeek
+
+{narrative}
+
+"""
 
     md += f"""---
 
@@ -242,6 +389,8 @@ def generate(report_date=None):
     candidates, confirmed, watchlist = get_opportunity_stats(report_date)
     trades                           = get_trade_stats(report_date)
     advisor                          = get_advisor_stats(report_date)
+    missed                           = get_missed_opportunities(report_date)
+    rejections                       = get_trader_rejections(report_date)
 
     # Calculate summary
     summary = calculate_daily_summary(trades)
@@ -249,12 +398,18 @@ def generate(report_date=None):
     # Save to performance.db
     save_daily_summary(report_date, summary)
 
+    # Ask DeepSeek for the narrative
+    narrative = generate_narrative(report_date, summary, candidates, confirmed, watchlist, trades, advisor)
+
     # Generate markdown
-    md   = generate_markdown(report_date, summary, candidates, confirmed, watchlist, trades, advisor)
+    md   = generate_markdown(
+        report_date, summary, candidates, confirmed, watchlist, trades, advisor,
+        missed=missed, rejections=rejections, narrative=narrative,
+    )
     path = os.path.join(REPORT_DIR, f"{report_date}.md")
 
     os.makedirs(REPORT_DIR, exist_ok=True)
-    with open(path, 'w') as f:
+    with open(path, 'w', encoding='utf-8') as f:
         f.write(md)
 
     log.info(f"Report saved to {path}")

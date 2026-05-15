@@ -18,6 +18,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("kestrel.watchlist")
 
+DEFAULT_STRATEGY = 'mean_reversion'
+
 def initialize():
     """Create watchlist database."""
     conn = sqlite3.connect(DB_WATCHLIST)
@@ -33,7 +35,8 @@ def initialize():
             avg_volume  INTEGER,
             notes       TEXT,
             added_at    TEXT,
-            status      TEXT
+            status      TEXT,
+            strategy    TEXT DEFAULT 'mean_reversion'
         )
     """)
 
@@ -41,22 +44,26 @@ def initialize():
     conn.close()
     log.info("watchlist.db initialized")
 
-def set_watchlist(candidates):
+def set_watchlist(candidates, strategy=DEFAULT_STRATEGY):
     """
-    Replace entire watchlist with new candidates.
-    Called by advisor every 5 minutes.
+    Replace this strategy's portion of the watchlist with new candidates.
+    Open positions (status='LONG') are preserved across runs.
+    Other strategies' rows are untouched.
     """
     conn = sqlite3.connect(DB_WATCHLIST)
     c    = conn.cursor()
 
-    # Clear existing watchlist except open positions
-    c.execute("DELETE FROM watchlist WHERE status != 'LONG'")
+    # Clear only THIS strategy's non-position rows
+    c.execute(
+        "DELETE FROM watchlist WHERE status != 'LONG' AND strategy = ?",
+        (strategy,)
+    )
 
     for candidate in candidates:
         c.execute("""
             INSERT OR REPLACE INTO watchlist
-            (rank, ticker, score, direction, gap_pct, avg_volume, notes, added_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (rank, ticker, score, direction, gap_pct, avg_volume, notes, added_at, status, strategy)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             candidate.get('rank'),
             candidate['ticker'],
@@ -66,7 +73,8 @@ def set_watchlist(candidates):
             candidate.get('avg_volume', 0),
             candidate.get('notes', ''),
             datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'WATCHING'
+            'WATCHING',
+            candidate.get('strategy', strategy)
         ))
 
     conn.commit()
@@ -76,6 +84,8 @@ def set_watchlist(candidates):
         from config import DB_SIGNALS
         import pandas as pd
         snapshot_df = pd.DataFrame(candidates)
+        if 'strategy' not in snapshot_df.columns:
+            snapshot_df['strategy'] = strategy
         snapshot_df['snapshot_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         conn_signals = sqlite3.connect(DB_SIGNALS)
         snapshot_df.to_sql('watchlist_history', conn_signals,
@@ -83,24 +93,36 @@ def set_watchlist(candidates):
         conn_signals.close()
     except Exception as e:
         log.debug(f"Watchlist history log failed: {e}")
-    log.info(f"Watchlist updated — {len(candidates)} stocks")
+    log.info(f"Watchlist updated [{strategy}] — {len(candidates)} stocks")
 
-def get_watchlist():
-    """Get current watchlist."""
+def get_watchlist(strategy=None):
+    """Get current watchlist. Optionally filter to one strategy."""
     conn = sqlite3.connect(DB_WATCHLIST)
     import pandas as pd
-    df = pd.read_sql(
-        "SELECT * FROM watchlist WHERE status != 'CLOSED' ORDER BY rank",
-        conn
-    )
+    if strategy is None:
+        df = pd.read_sql(
+            "SELECT * FROM watchlist WHERE status != 'CLOSED' ORDER BY rank",
+            conn
+        )
+    else:
+        df = pd.read_sql(
+            "SELECT * FROM watchlist WHERE status != 'CLOSED' AND strategy = ? ORDER BY rank",
+            conn, params=(strategy,)
+        )
     conn.close()
     return df
 
-def get_active_tickers():
-    """Get list of active tickers."""
+def get_active_tickers(strategy=None):
+    """Get list of active tickers. Optionally filter to one strategy."""
     conn = sqlite3.connect(DB_WATCHLIST)
     c    = conn.cursor()
-    c.execute("SELECT ticker FROM watchlist WHERE status != 'CLOSED'")
+    if strategy is None:
+        c.execute("SELECT ticker FROM watchlist WHERE status != 'CLOSED'")
+    else:
+        c.execute(
+            "SELECT ticker FROM watchlist WHERE status != 'CLOSED' AND strategy = ?",
+            (strategy,)
+        )
     tickers = [row[0] for row in c.fetchall()]
     conn.close()
     return tickers

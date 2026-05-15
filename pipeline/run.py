@@ -113,11 +113,23 @@ def get_last_run(agent):
         return "never"
     try:
         with open(log_file, 'rb') as f:
-            f.seek(-2, 2)
-            while f.read(1) != b'\n':
-                f.seek(-2, 1)
-            last_line = f.readline().decode()
-        return last_line[:19]
+            f.seek(0, 2)
+            size = f.tell()
+            if size == 0:
+                return "never"
+            # walk back past trailing newlines, then find prior newline
+            offset = size - 1
+            f.seek(offset, 0)
+            while offset > 0 and f.read(1) in (b'\n', b'\r'):
+                offset -= 1
+                f.seek(offset, 0)
+            while offset > 0:
+                f.seek(offset - 1, 0)
+                if f.read(1) == b'\n':
+                    break
+                offset -= 1
+            last_line = f.readline().decode(errors='replace').strip()
+        return last_line[:19] if last_line else "unknown"
     except Exception:
         return "unknown"
 
@@ -153,13 +165,21 @@ def print_startup():
     print(f"  Pending Reports:  {pending}")
     print()
     if is_trading_day() and seconds_until(MARKET_CLOSE_TIME) > 0:
-        secs_pre = seconds_until(PRE_MARKET_TIME)
+        secs_to_open  = seconds_until(OPEN_SCAN_TIME)
+        secs_to_close = seconds_until(MARKET_CLOSE_TIME)
+        secs_pre      = seconds_until(PRE_MARKET_TIME)
         if secs_pre > 0:
             h = int(secs_pre // 3600)
             m = int((secs_pre % 3600) // 60)
             print(f"  Next Event:       Pre-market scan in {h}h {m}m")
-        print(f"  Market Open:      {next_open.strftime('%A %B %d at %I:%M%p PT')}")
-        print(f"                    in {h_open}h {m_open}m")
+        if secs_to_open > 0:
+            h = int(secs_to_open // 3600)
+            m = int((secs_to_open % 3600) // 60)
+            print(f"  Market Open:      today at 06:30AM PT — in {h}h {m}m")
+        else:
+            h = int(secs_to_close // 3600)
+            m = int((secs_to_close % 3600) // 60)
+            print(f"  Market Open:      NOW — closes in {h}h {m}m")
         print(f"\n  Status:           STARTING — trading day ahead")
     else:
         print(f"  Next Open:        {next_open.strftime('%A %B %d at %I:%M%p PT')}")
@@ -252,6 +272,22 @@ def run_open_scan():
     except Exception as e:
         log.error(f"Open scan failed: {e}")
 
+def run_scorers():
+    """Run all strategy scorers in order. Mean-reversion writes first; momentum
+    skips any ticker already on the watchlist."""
+    log.info("Running advisor scorers (mean-reversion + momentum)...")
+    try:
+        from feed.advisor.mean_reversion_scorer import run as run_mr
+        run_mr()
+    except Exception as e:
+        log.error(f"Mean-reversion scoring failed: {e}", exc_info=True)
+    try:
+        from feed.advisor.momentum_scorer import run as run_momentum
+        run_momentum()
+    except Exception as e:
+        log.error(f"Momentum scoring failed: {e}", exc_info=True)
+    log.info("Advisor scorers complete")
+
 def run_rightbrain_trainer():
     """Run rightbrain nightly training."""
     log.info("Running rightbrain nightly trainer...")
@@ -261,6 +297,27 @@ def run_rightbrain_trainer():
         log.info("rightbrain training complete")
     except Exception as e:
         log.error(f"rightbrain training failed: {e}")
+
+def run_leftbrain_trainer():
+    """Run leftbrain nightly training."""
+    log.info("Running leftbrain nightly trainer...")
+    try:
+        from birdbrain.leftbrain.trainer import run
+        run()
+        log.info("leftbrain training complete")
+    except Exception as e:
+        log.error(f"leftbrain training failed: {e}")
+
+def run_missed_sweep():
+    """End-of-day pass: log every watchlist ticker we didn't trade today
+    and what it did intraday. Feeds the NN trainers with what we missed."""
+    log.info("Running missed-opportunity sweep...")
+    try:
+        from pipeline.missed_sweep import run
+        run()
+        log.info("Missed-opportunity sweep complete")
+    except Exception as e:
+        log.error(f"Missed-opportunity sweep failed: {e}", exc_info=True)
 
 def run_daily_report():
     """Run daily report generator."""
@@ -312,18 +369,24 @@ def daily_cycle():
     sleep_until(PRE_MARKET_TIME, "pre-market scan")
     run_pre_market_scan()
 
-    # 6:30am — open scan + trader
+    # 6:30am — open scan + scorers (both strategies) + trader
     sleep_until(OPEN_SCAN_TIME, "market open")
     run_open_scan()
+    run_scorers()
 
     log.info("Starting trader...")
-    asyncio.run(run_trader())
+    try:
+        asyncio.run(run_trader())
+    except Exception as e:
+        log.error(f"Trader crashed: {e}", exc_info=True)
 
     # 1:00pm — market closes, trader handles its own close
     # 1:15pm — daily report
     sleep_until(DAILY_REPORT_TIME, "daily report")
     print_end_of_day()
+    run_missed_sweep()
     run_rightbrain_trainer()
+    run_leftbrain_trainer()
     run_daily_report()
 
     # Sunday 8pm — weekly report

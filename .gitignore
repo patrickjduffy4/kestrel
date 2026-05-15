@@ -1,26 +1,55 @@
-# API keys and config
+# =============================================================================
+# Kestrel .gitignore  —  strict mode (3.2.1)
+# Strategy code + NN code + strategic docs are private.
+# Infrastructure (orchestration, db wrappers, data pull, Alpaca wrappers) is
+# kept public so this still works as a code reference.
+# =============================================================================
+
+# --- API keys ---
 config.py
 
-# Algorithm core — don't share
-feed/advisor/scorer.py
-feed/advisor/model.py
+# --- Scoring / advisor (the rubric) ---
+feed/advisor/
+
+# --- Trader strategy + entry/exit rules ---
+trader/rule_engine/strategies.py
+trader/rule_engine/trader.py
+trader/rule_engine/positions.py
+
+# --- End-of-day "what we missed" sweep ---
+pipeline/missed_sweep.py
+
+# --- Intraday scanner stub (kept private until built) ---
 feed/opportunity/intraday_scan.py
 
-# Python
+# --- All NN code: model architectures, feature engineering, training ---
+birdbrain/
+
+# --- Strategic docs (the playbook, plans, web map) ---
+INTENT.md
+ARCHITECTURE.md
+WEB.html
+WEB.data.js
+
+# --- Schema migrations (reveal data model evolution) ---
+migrations/
+
+# --- Python ---
 __pycache__/
 *.pyc
 *.pyo
 .venv/
 
-# Data — too large for version control
+# --- Generated data / receipts ---
 data/
 models/
 logs/
 reports/
 watchlists/
 
-# Database files
+# --- SQLite ---
 *.db
 
-# PyCharm
+# --- IDE + housekeeping ---
 .idea/
+.setup_complete

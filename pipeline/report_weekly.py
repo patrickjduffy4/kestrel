@@ -3,10 +3,10 @@ import sqlite3
 import logging
 import pandas as pd
 from datetime import datetime, date, timedelta
-import anthropic
 
 # --- Config ---
-from config import ROOT, DB_SIGNALS, ANTHROPIC_API_KEY
+from config import ROOT, DB_SIGNALS
+from pipeline.scribe import ask_claude
 from pipeline.performance_db import (
     mark_report_pending,
     mark_report_complete,
@@ -30,7 +30,6 @@ log = logging.getLogger("kestrel.report_weekly")
 
 DB_PERF    = os.path.join(ROOT, "data/database/performance.db")
 REPORT_DIR = os.path.join(ROOT, "reports/weekly")
-claude     = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 def get_week_dates():
     """Get Monday-Friday dates for the most recent trading week."""
@@ -58,23 +57,39 @@ def get_week_scan_results(start_date, end_date):
     finally:
         conn.close()
 
-def call_claude(system_prompt, user_prompt):
-    """Make a single Claude API call."""
+def get_week_missed(start_date, end_date):
+    """Pull missed_opportunities rows for the week."""
+    conn = sqlite3.connect(DB_SIGNALS)
     try:
-        message = claude.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=5000,
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"{system_prompt}\n\n{user_prompt}"
-                }
-            ]
+        return pd.read_sql(
+            "SELECT * FROM missed_opportunities WHERE date BETWEEN ? AND ?",
+            conn, params=(start_date, end_date)
         )
-        return message.content[0].text
     except Exception as e:
-        log.error(f"Claude API call failed: {e}")
-        return f"_Analysis unavailable: {e}_"
+        log.error(f"Failed to get missed: {e}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+def per_strategy_week_stats(trades_df):
+    """Same shape as report_daily's per_strategy_stats, but for the whole week."""
+    if trades_df.empty or 'strategy' not in trades_df.columns:
+        return {}
+    out = {}
+    for strat, sub in trades_df.groupby('strategy'):
+        wins = sub[sub['pnl'] > 0]
+        out[strat] = {
+            'trades':   len(sub),
+            'pnl':      round(sub['pnl'].sum(), 2),
+            'win_rate': round(len(wins) / len(sub) * 100, 1) if len(sub) > 0 else 0,
+            'avg_win':  round(wins['pnl'].mean(), 2) if not wins.empty else 0,
+            'avg_loss': round(sub[sub['pnl'] <= 0]['pnl'].mean(), 2) if (sub['pnl'] <= 0).any() else 0,
+        }
+    return out
+
+def call_claude(system_prompt, user_prompt):
+    """Make a single Claude API call via the reports department."""
+    return ask_claude(system_prompt, user_prompt)
 
 def analyze_opportunity(candidates, confirmed, start_date, end_date):
     """Claude call 1 — Opportunity agent analysis."""
@@ -145,8 +160,8 @@ Analyze:
 
     return call_claude(system, user)
 
-def analyze_trading(trades_df, summaries_df, start_date, end_date):
-    """Claude call 3 — Trading performance analysis."""
+def analyze_trading(trades_df, summaries_df, missed_df, start_date, end_date):
+    """Claude call 3 — Trading performance analysis (now per-strategy aware)."""
     log.info("Claude call 3: Trading performance analysis...")
 
     if trades_df.empty:
@@ -157,13 +172,39 @@ def analyze_trading(trades_df, summaries_df, start_date, end_date):
     avg_win   = round(trades_df[trades_df['pnl'] > 0]['pnl'].mean(), 2) if len(trades_df[trades_df['pnl'] > 0]) > 0 else 0
     avg_loss  = round(trades_df[trades_df['pnl'] <= 0]['pnl'].mean(), 2) if len(trades_df[trades_df['pnl'] <= 0]) > 0 else 0
 
+    # Per-strategy stats
+    strat_stats = per_strategy_week_stats(trades_df)
+    strat_lines = "\n".join(
+        f"  - {s}: {v['trades']} trades | ${v['pnl']:,.2f} | {v['win_rate']}% wins | "
+        f"avg win ${v['avg_win']:,.2f} | avg loss ${v['avg_loss']:,.2f}"
+        for s, v in strat_stats.items()
+    ) or "  (no per-strategy breakdown)"
+
+    # Missed opportunities — what we left on the table
+    miss_summary = "  (no missed_opportunities data)"
+    if missed_df is not None and not missed_df.empty:
+        ut = missed_df[missed_df['was_traded'] == 0]
+        if not ut.empty:
+            top_up = ut.nlargest(10, 'max_up_pct')[
+                ['date', 'ticker', 'strategy', 'score', 'max_up_pct', 'close_return_pct']
+            ]
+            miss_summary = (
+                f"  total skipped tickers: {len(ut)}\n"
+                f"  avg max_up of skipped: {ut['max_up_pct'].mean():.2f}%\n"
+                f"  top 10 untraded movers:\n"
+                f"{top_up.to_string(index=False)}"
+            )
+
     system = """You are analyzing the trading performance of Kestrel,
-an automated day trading system. Be direct and specific.
-Focus on what's working, what isn't, and concrete improvements."""
+an automated day trading system that runs TWO strategies in parallel:
+mean_reversion (the bounce list) and momentum (the breakout list).
+Be direct and specific. Compare strategies side by side. Focus on
+what's working, what isn't, what we left on the table, and concrete
+improvements."""
 
     user = f"""Week: {start_date} to {end_date}
 
-TRADING STATS:
+OVERALL TRADING STATS:
 - Total P&L: ${total_pnl:,.2f}
 - Total trades: {len(trades_df)}
 - Win rate: {win_rate}%
@@ -172,17 +213,24 @@ TRADING STATS:
 - Best trade: ${trades_df['pnl'].max():,.2f}
 - Worst trade: ${trades_df['pnl'].min():,.2f}
 
+PER-STRATEGY BREAKDOWN:
+{strat_lines}
+
 Daily P&L breakdown:
 {summaries_df[['date', 'total_pnl', 'win_rate', 'total_trades']].to_string() if not summaries_df.empty else 'None'}
 
 Top 10 trades by P&L:
-{trades_df.nlargest(10, 'pnl')[['ticker', 'direction', 'entry_price', 'exit_price', 'pnl', 'hold_time_minutes']].to_string()}
+{trades_df.nlargest(10, 'pnl')[['ticker', 'strategy', 'entry_price', 'exit_price', 'pnl', 'hold_time_minutes']].to_string() if 'strategy' in trades_df.columns else trades_df.nlargest(10, 'pnl')[['ticker', 'entry_price', 'exit_price', 'pnl', 'hold_time_minutes']].to_string()}
+
+WHAT WE MISSED (watchlist tickers we never entered):
+{miss_summary}
 
 Analyze:
-1. What setups are generating the most profit?
-2. What setups are causing losses?
+1. Which strategy is contributing more profit and why?
+2. What setups inside each strategy are generating the most profit / worst losses?
 3. Is hold time optimal or are we exiting too early/late?
-4. What should the Trader focus on next week?"""
+4. What did we leave on the table — were the missed-opportunity skips the right calls?
+5. What should the trader focus on next week, per strategy?"""
 
     return call_claude(system, user)
 
@@ -215,7 +263,7 @@ Based on all three analyses:
 
     return call_claude(system, user)
 
-def generate_markdown(start_date, end_date, summaries, trades,
+def generate_markdown(start_date, end_date, summaries, trades, missed,
                       opportunity_analysis, advisor_analysis,
                       trading_analysis, strategy_analysis):
     """Compile all four analyses into one weekly markdown report."""
@@ -238,7 +286,20 @@ def generate_markdown(start_date, end_date, summaries, trades,
 | Win Rate | {win_rate}% |
 | Trading Days | {len(summaries)} |
 
-### Daily P&L
+"""
+
+    # Per-strategy table
+    strat_stats = per_strategy_week_stats(trades)
+    if strat_stats:
+        md += "### P&L by Strategy\n\n"
+        md += "| Strategy | Trades | P&L | Win Rate | Avg Win | Avg Loss |\n"
+        md += "|---|---|---|---|---|---|\n"
+        for strat, s in strat_stats.items():
+            md += (f"| {strat} | {s['trades']} | ${s['pnl']:,.2f} | "
+                   f"{s['win_rate']}% | ${s['avg_win']:,.2f} | ${s['avg_loss']:,.2f} |\n")
+        md += "\n"
+
+    md += """### Daily P&L
 | Date | P&L | Trades | Win Rate |
 |---|---|---|---|
 """
@@ -246,6 +307,18 @@ def generate_markdown(start_date, end_date, summaries, trades,
     if not summaries.empty:
         for _, row in summaries.iterrows():
             md += f"| {row['date']} | ${row.get('total_pnl', 0):,.2f} | {row.get('total_trades', 0)} | {row.get('win_rate', 0)}% |\n"
+
+    # Missed-opportunities top-of-week roundup
+    if missed is not None and not missed.empty:
+        ut = missed[missed['was_traded'] == 0]
+        if not ut.empty:
+            md += "\n### Top Missed Opportunities (Week)\n\n"
+            md += "| Date | Ticker | Strategy | Score | Max Up | Close |\n"
+            md += "|---|---|---|---|---|---|\n"
+            for _, r in ut.nlargest(15, 'max_up_pct').iterrows():
+                md += (f"| {r['date']} | {r['ticker']} | {r['strategy']} | "
+                       f"{r['score']:.2f} | {r['max_up_pct']:+.2f}% | "
+                       f"{r['close_return_pct']:+.2f}% |\n")
 
     md += f"""
 ---
@@ -290,17 +363,18 @@ def generate(start_date=None, end_date=None):
     trades                = get_week_trades(start_date, end_date)
     advisor               = get_week_advisor_log(start_date, end_date)
     candidates, confirmed = get_week_scan_results(start_date, end_date)
+    missed                = get_week_missed(start_date, end_date)
 
     opportunity_analysis = analyze_opportunity(candidates, confirmed, start_date, end_date)
     advisor_analysis     = analyze_advisor(advisor, start_date, end_date)
-    trading_analysis     = analyze_trading(trades, summaries, start_date, end_date)
+    trading_analysis     = analyze_trading(trades, summaries, missed, start_date, end_date)
     strategy_analysis    = analyze_strategy(
         opportunity_analysis, advisor_analysis,
         trading_analysis, start_date, end_date
     )
 
     md = generate_markdown(
-        start_date, end_date, summaries, trades,
+        start_date, end_date, summaries, trades, missed,
         opportunity_analysis, advisor_analysis,
         trading_analysis, strategy_analysis
     )

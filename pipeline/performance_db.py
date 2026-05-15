@@ -44,6 +44,7 @@ def initialize():
             system_a_score      REAL,
             system_b_score      REAL,
             outcome             TEXT,
+            strategy            TEXT DEFAULT 'mean_reversion',
             created_at          TEXT
         )
     """)
@@ -163,9 +164,50 @@ def initialize_signals_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_signals_date ON intraday_signals(date)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_signals_ticker ON intraday_signals(ticker)")
 
+    # --- Trader rejections (NN training data — what trader saw and skipped) ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS trader_rejections (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp       TEXT,
+            date            TEXT,
+            ticker          TEXT,
+            current_price   REAL,
+            score           REAL,
+            strategy        TEXT,
+            reason          TEXT
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_rej_date    ON trader_rejections(date)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_rej_ticker  ON trader_rejections(ticker)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_rej_reason  ON trader_rejections(reason)")
+
+    # --- Missed opportunities (end-of-day sweep — what we should have traded) ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS missed_opportunities (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            date              TEXT,
+            ticker            TEXT,
+            strategy          TEXT,
+            score             REAL,
+            day_open          REAL,
+            day_high          REAL,
+            day_low           REAL,
+            day_close         REAL,
+            max_up_pct        REAL,
+            max_down_pct      REAL,
+            close_return_pct  REAL,
+            was_traded        INTEGER,
+            swept_at          TEXT,
+            UNIQUE(date, ticker)
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_miss_date     ON missed_opportunities(date)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_miss_ticker   ON missed_opportunities(ticker)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_miss_strategy ON missed_opportunities(strategy)")
+
     conn.commit()
     conn.close()
-    log.info("signals.db expanded with advisor_log, watchlists, intraday_signals")
+    log.info("signals.db expanded with advisor_log, watchlists, intraday_signals, trader_rejections, missed_opportunities")
 
 def initialize_market_data_db():
     """Create market data database tables."""

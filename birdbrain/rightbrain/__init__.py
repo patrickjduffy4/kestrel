@@ -1,1 +1,0 @@
-# Kestrel rightbrain module

@@ -28,7 +28,7 @@ Four departments.
 
 **Trader** does execution. `rule_engine/` handles buy/sell/stop logic and runs the live loop. `nn_engine/` is reserved for the Left Brain NN once the rule engine is mature.
 
-**Bird Brain** is the learning side. `leftbrain/` is the NN trader, learning from the rule engine and Claude. `rightbrain/` is the NN advisor, learning from the rule-based advisor and Claude.
+**Birdbrain** is the learning side. `leftbrain/` is the NN trader, learning from the rule engine and Claude. `rightbrain/` is the NN advisor, learning from the rule-based advisor and Claude.
 
 **Pipeline** is orchestration. Runs all agents in order, generates reports, manages scheduling.
 
@@ -61,8 +61,8 @@ Four analyses every Sunday: opportunity agent performance, advisor performance (
 | Weekly Report (Claude) | done     | public |
 | Rule-based Advisor     | done     | gated  |
 | Rule Engine Trader     | done     | gated  |
-| Right Brain NN Advisor | training | gated  |
-| Left Brain NN Trader   | dev      | gated  |
+| Rightbrain NN Advisor | training | gated  |
+| Leftbrain NN Trader   | dev      | gated  |
 
 ## Known issues
 

@@ -1,11 +1,10 @@
 # Kestrel
-Automated US market surveillance and day trading system.
 
-Watches the full US equity market, scores stocks daily, and feeds an aggressive day trading bot.
+Automated US market surveillance and day trading system. Watches the full US equity market, scores stocks daily, and feeds an aggressive day trading bot.
 
-## What's in this repo
+## What's here, what's not
 
-Infrastructure (data pull, orchestration, db wrappers, broker adapters, reporting) is public. Strategy (scoring rubrics, entry/exit rules, NN models) is gated — that's the part you can't recover from an architecture diagram.
+Infrastructure (data pull, orchestration, db wrappers, broker adapters, reporting) is public. Strategy (scoring rubrics, entry/exit rules, NN models) is gated. That's the part you can't recover from a diagram.
 
 ## Setup
 
@@ -19,51 +18,35 @@ cp .env.example .env             # fill in your API keys
 python kestrel.py
 ```
 
-Windows by default — first run drops a desktop shortcut + .bat launcher. Skip those on macOS/Linux and update paths in `config.py`.
+Windows by default. First run drops a desktop shortcut and a .bat launcher. On macOS/Linux, skip those and fix the paths in `config.py`.
 
 ## Architecture
 
-### Feed — market intelligence
-- `scan/` — classifies and tracks the full US equity universe
-- `market_pull/` — keeps price and fundamental data current
-- `opportunity/` — detects gap and intraday trading setups
-- `advisor/` — rule-based scorers, build daily watchlist
+Four departments.
 
-### Trader — execution
-- `rule_engine/` — rule-based buy/sell/stop logic
-- `nn_engine/` — Left Brain NN execution (build after rule engine)
+**Feed** is the market intelligence layer. `scan/` classifies and tracks the full US equity universe. `market_pull/` keeps price and fundamental data current. `opportunity/` detects gap and intraday trading setups. `advisor/` runs two rule-based scorers and builds the daily watchlist.
 
-### Bird Brain — learning systems
-- `leftbrain/` — NN trader, learns from rule_engine + Claude
-- `rightbrain/` — NN advisor, learns from advisor + Claude
+**Trader** does execution. `rule_engine/` handles buy/sell/stop logic and runs the live loop. `nn_engine/` is reserved for the Left Brain NN once the rule engine is mature.
 
-### Pipeline — orchestration
-Runs all agents in correct order. Generates reports. Manages scheduling.
+**Bird Brain** is the learning side. `leftbrain/` is the NN trader, learning from the rule engine and Claude. `rightbrain/` is the NN advisor, learning from the rule-based advisor and Claude.
 
-## Advisor Architecture
+**Pipeline** is orchestration. Runs all agents in order, generates reports, manages scheduling.
 
-**Rule-based Advisor** — two scorers, one shared watchlist. Mean-reversion (the "bounce list") and momentum (the "breakout list"). Transparent, tunable, runs in production. Generates labeled training data, plus an end-of-day sweep that logs what the system *didn't* trade — so the NNs learn from inaction too.
+## Strategy
 
-**Right Brain** — NN advisor in shadow mode.
-Watches rule-based advisor, learns from outcomes.
-Runs separate paper account. Graduates after 30 days outperforming rules.
+Two strategies, running in parallel. The mean-reversion list (the "bounce list") and the momentum list (the "breakout list"). Each gets its own scorer with different qualification rules, but they share one watchlist, one trader process, and one position cap.
 
-## Trader Architecture
+Inside the trader, each strategy has its own entry rules. Positions remember which one created them so reports can break out P&L per strategy. Multiple trades per stock per day is fine. All positions close by 1pm PT.
 
-**Rule Engine** — one trader process, two strategies. Mean-reversion and momentum each own their entry rules. Positions remember which strategy created them; reporting breaks P&L out per strategy. Shared position cap. All positions closed by 1pm PT.
+Both NN trainers also consume an end-of-day sweep that logs what the system *didn't* trade, so they learn from inaction as well as from trades that happened.
 
-**Left Brain** — NN trader in shadow mode.
-Watches rule engine, learns better entry/exit timing.
-Runs separate paper account. Graduates after 30 days outperforming rules.
+## The NNs
 
-## Claude — Weekly Strategic Advisor
-Four focused analyses every Sunday:
-1. Opportunity agent performance
-2. Advisor performance — rule vs NN
-3. Trading performance — rule vs NN
-4. Strategic recommendations
+Both run in shadow mode against a separate paper account. They watch their rule-based counterpart, score every decision, and only graduate after 30 days of outperforming the rules.
 
-Findings feed back into both NN training loops.
+## Claude
+
+Four analyses every Sunday: opportunity agent performance, advisor performance (rule vs NN), trading performance (rule vs NN), and strategic recommendations. Findings feed back into both NN training loops.
 
 ## Status
 
@@ -81,10 +64,10 @@ Findings feed back into both NN training loops.
 | Right Brain NN Advisor | training | gated  |
 | Left Brain NN Trader   | dev      | gated  |
 
-## Known Issues
-- Volume ratio showing 0.0 — needs minute bar history
-- QUCY data quality ghost slipping through z-score
-- Catalyst tagging not yet implemented
+## Known issues
+
+Volume ratio is showing 0.0; needs minute bar history. QUCY data quality ghost slipping through the z-score gate. Catalyst tagging isn't implemented yet.
 
 ## Data
-~6,700 US stocks tracked. 10 years of daily history. Updated daily.
+
+~6,700 US stocks. 10 years of daily history. Updated daily.

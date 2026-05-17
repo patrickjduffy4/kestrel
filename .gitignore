@@ -5,8 +5,8 @@
 # kept public so this still works as a code reference.
 # =============================================================================
 
-# --- API keys ---
-config.py
+# --- Secrets ---
+.env
 
 # --- Scoring / advisor (the rubric) ---
 feed/advisor/

@@ -76,6 +76,14 @@ def save_ticker(ticker, df):
     # If file exists, merge with existing data
     if os.path.exists(path):
         existing = pd.read_parquet(path)
+        # Legacy parquets had yfinance-style MultiIndex columns like ('Close','AAPL').
+        # New Alpaca data has flat columns ('open','high',...). Flatten and lowercase
+        # existing so the two frames can be concatenated.
+        if isinstance(existing.columns, pd.MultiIndex):
+            existing.columns = [
+                str(c[0] if isinstance(c, tuple) else c).lower()
+                for c in existing.columns
+            ]
         df = pd.concat([existing, df])
         df = df[~df.index.duplicated(keep='last')]
         df = df.sort_index()

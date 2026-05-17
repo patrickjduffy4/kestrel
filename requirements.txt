@@ -1,0 +1,28 @@
+# Kestrel runtime dependencies.
+# Versions reflect the working environment; bump as needed.
+
+# Market data + scanning
+yfinance>=1.3.0
+requests>=2.32
+
+# Broker + market data API
+alpaca-py>=0.43.0
+
+# Data
+pandas>=2.2
+numpy>=2.0
+pyarrow>=18
+
+# Neural network engines (birdbrain)
+torch>=2.5
+
+# Weekly strategic advisor
+anthropic>=0.40
+
+# Secrets loader (reads .env into os.environ)
+python-dotenv>=1.0
+
+# Windows-only: desktop shortcut on first run.
+# Safe to skip on macOS/Linux — kestrel.py degrades gracefully.
+winshell>=0.6 ; sys_platform == "win32"
+pywin32>=306  ; sys_platform == "win32"

@@ -3,29 +3,46 @@ Automated US market surveillance and day trading system.
 
 Watches the full US equity market, scores stocks daily, and feeds an aggressive day trading bot.
 
+## What's in this repo
+
+Infrastructure (data pull, orchestration, db wrappers, broker adapters, reporting) is public. Strategy (scoring rubrics, entry/exit rules, NN models) is gated — that's the part you can't recover from an architecture diagram.
+
+## Setup
+
+```bash
+git clone <repo>
+cd kestrel
+python -m venv .venv
+.venv\Scripts\activate           # or: source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env             # fill in your API keys
+python kestrel.py
+```
+
+Windows by default — first run drops a desktop shortcut + .bat launcher. Skip those on macOS/Linux and update paths in `config.py`.
+
 ## Architecture
 
 ### Feed — market intelligence
 - `scan/` — classifies and tracks the full US equity universe
 - `market_pull/` — keeps price and fundamental data current
 - `opportunity/` — detects gap and intraday trading setups
-- `advisor/` — rule-based scorer, builds daily watchlist
+- `advisor/` — rule-based scorers, build daily watchlist
 
 ### Trader — execution
 - `rule_engine/` — rule-based buy/sell/stop logic
 - `nn_engine/` — Left Brain NN execution (build after rule engine)
 
 ### Bird Brain — learning systems
-- `left_brain/` — NN trader, learns from rule_engine + Claude
-- `right_brain/` — NN advisor, learns from advisor + Claude
+- `leftbrain/` — NN trader, learns from rule_engine + Claude
+- `rightbrain/` — NN advisor, learns from advisor + Claude
 
 ### Pipeline — orchestration
 Runs all agents in correct order. Generates reports. Manages scheduling.
 
 ## Advisor Architecture
 
-**Rule-based Advisor** — scores gap candidates, maintains 20 stock watchlist.
-Transparent, tunable, works immediately. Generates labeled training data.
+**Rule-based Advisor** — two scorers, one shared watchlist. Mean-reversion (the "bounce list") and momentum (the "breakout list"). Transparent, tunable, runs in production. Generates labeled training data, plus an end-of-day sweep that logs what the system *didn't* trade — so the NNs learn from inaction too.
 
 **Right Brain** — NN advisor in shadow mode.
 Watches rule-based advisor, learns from outcomes.
@@ -33,9 +50,7 @@ Runs separate paper account. Graduates after 30 days outperforming rules.
 
 ## Trader Architecture
 
-**Rule Engine** — executes trades based on watchlist and signals.
-Manages entries, exits, stop losses, take profits.
-Aggressive day trader — multiple trades per stock per day, all closed by 1pm PT.
+**Rule Engine** — one trader process, two strategies. Mean-reversion and momentum each own their entry rules. Positions remember which strategy created them; reporting breaks P&L out per strategy. Shared position cap. All positions closed by 1pm PT.
 
 **Left Brain** — NN trader in shadow mode.
 Watches rule engine, learns better entry/exit timing.
@@ -50,28 +65,21 @@ Four focused analyses every Sunday:
 
 Findings feed back into both NN training loops.
 
-## Build Order
-1. feed/advisor/       rule-based scorer         ← next
-2. trader/rule_engine  rule-based execution
-3. pipeline            orchestration
-4. birdbrain/rightbrain  NN advisor
-5. birdbrain/leftbrain   NN trader
-
 ## Status
 
-| Component | Status |
-|---|---|
-| Scan | done |
-| Market Pull | done |
-| Pre-market Opportunity | done |
-| Open Scan | done |
-| Daily Report | done |
-| Weekly Report (Claude) | done |
-| Rule-based Advisor | next |
-| Rule Engine Trader | planned |
-| Pipeline | planned |
-| Right Brain NN Advisor | planned |
-| Left Brain NN Trader | planned |
+| Component              | Status   | Code   |
+|------------------------|----------|--------|
+| Scan                   | done     | public |
+| Market Pull            | done     | public |
+| Pre-market Opportunity | done     | public |
+| Open Scan              | done     | public |
+| Pipeline Orchestrator  | done     | public |
+| Daily Report           | done     | public |
+| Weekly Report (Claude) | done     | public |
+| Rule-based Advisor     | done     | gated  |
+| Rule Engine Trader     | done     | gated  |
+| Right Brain NN Advisor | training | gated  |
+| Left Brain NN Trader   | dev      | gated  |
 
 ## Known Issues
 - Volume ratio showing 0.0 — needs minute bar history
